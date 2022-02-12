@@ -37,7 +37,6 @@ function Personajes() {
           <Personaje
             key={`personaje${index + 1}`}
             name={personaje.name}
-            genero={personaje.gender}
             foto={personaje.image}
           />
         ))
