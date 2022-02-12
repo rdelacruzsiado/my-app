@@ -1,0 +1,78 @@
+version: 2.1
+jobs:
+  build:
+    docker:
+    - image: cimg/base:2022.01
+    steps:
+      - setup_remote_docker
+      - checkout
+      - node/install:
+          node-version: "16.14"
+      - run:
+          name: Deployment Step
+          command: |
+            #!/bin/sh
+            npm install
+            npm run build
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - build
+  deploy:
+    docker:
+    - image: cimg/base:2022.01
+    steps:
+    - setup_remote_docker
+    - attach_workspace:
+          at: ~/project
+    - aws-cli/setup:
+        aws-access-key-id: AWS_ACCESS_KEY_ID
+        aws-secret-access-key: AWS_SECRET_ACCESS_KEY
+        aws-region: AWS_REGION
+    - run:
+        name: Add security group rule ingress
+        command: |
+          #!/bin/sh
+          LATEST_IP=$(wget -qO- ifconfig.me)
+          MY_IP="$LATEST_IP/32"
+          aws ec2 authorize-security-group-ingress \
+            --group-name $GROUP_NAME \
+            --protocol tcp \
+            --port 22 \
+            --cidr $MY_IP
+    - run:
+        name: Deploy Over SSH
+        command: |
+          #!/bin/sh
+          scp -o StrictHostKeyChecking=no -r build $SSH_USER@$SSH_HOST:$PROJECT_ROUTE
+          ssh -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST "pm2 restart frontend"
+    - run:
+        name: Revoke security group rule ingress
+        command: |
+          #!/bin/sh
+          LATEST_IP=$(wget -qO- ifconfig.me)
+          MY_IP="$LATEST_IP/32"
+          aws ec2 revoke-security-group-ingress \
+            --group-name $GROUP_NAME \
+            --protocol tcp \
+            --port 22 \
+            --cidr $MY_IP
+orbs:
+  node: circleci/node@4.1.0
+  aws-cli: circleci/aws-cli@1.3.1
+workflows:
+  version: 2
+  project_fnt_wf:
+    jobs:
+      - build:
+          filters:
+            branches:
+              only:
+                - main
+      - deploy:
+          filters:
+            branches:
+              only:
+                - main
+          requires:
+            - build
